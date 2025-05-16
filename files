@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+import argparse
+import os
+import sys
+from pathlib import Path
+
+IGNORE_DIRS = {".venv", "node_modules", ".git", "__pycache__", "build"}
+EXTENSION_ALIASES = {
+    "++": (".cpp", ".hpp", ".h", ".c", ".cc", ".cxx", ".hxx"),
+}
+
+
+def find_files(extensions: str | tuple[str, ...]):
+    for current_root, dirs, files in os.walk(Path(".")):
+        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+
+        for filename in files:
+            if filename.endswith(extensions):
+                yield Path(current_root) / filename
+
+
+def get_extensions(raw_ext: str):
+    if raw_ext in EXTENSION_ALIASES:
+        return EXTENSION_ALIASES[raw_ext]
+    return (not raw_ext.startswith(".")) and f".{raw_ext}" or raw_ext
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Find and cat files with a specific extension."
+    )
+    parser.add_argument(
+        "extension",
+        help="The file extension to search for (e.g., 'py', '.txt'). ++ Is a special alias for hpp/cpp",
+    )
+    args = parser.parse_args()
+
+    extension = get_extensions(args.extension)
+
+    files = list(find_files(extension))
+
+    if not files:
+        print(f"No files found with extension '{extension}'", file=sys.stderr)
+        return
+
+    for file_path in files:
+        print(f">> File: {file_path}")
+
+        try:
+            print(file_path.read_text(encoding="utf-8", errors="replace"), flush=False)
+        except Exception as e:
+            print(f"[Error reading file: {e}]", file=sys.stderr)
+
+    sys.stdout.flush()
+
+    print(f"Found {len(files)} file(s)", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+sudo ip netns exec vpnns sudo -u $USER -- "$@"

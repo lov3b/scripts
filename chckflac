@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v parallel > /dev/null; then
+	echo "parallel isn't installed"
+	exit 0
+fi
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  echo "Usage: $(basename "$0") [dir]"
+  exit 0
+fi
+
+dir="${1:-.}"
+
+mapfile -d $'\0' files < <(find "$dir" -type f -name '*.flac' -print0)
+files_len=${#files[@]}
+
+# Confirm if there's a lot of files
+if (( files_len > 20 )); then
+  echo -n "Found $files_len FLAC files. Proceed? (y/N) "
+  read -r yn
+  if [[ ! $yn =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 1
+  fi
+fi
+
+printf '%s\0' "${files[@]}" \
+  | parallel --null --bar flac -f8 -s {}

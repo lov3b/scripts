@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+# Sometimes the GPG specific protocol is blocked, let's use HTTP then.
+
+if [ -z "$1" ]; then
+	echo "Usage: $(basename "$0") <fingerprint>"
+	echo "Usage: $0 <fingerprint>"
+    exit 1
+fi
+
+fingerprint="$1"
+keyfile=$(mktemp)
+
+trap 'rm -f "$keyfile"' EXIT
+
+curl -s "https://keys.openpgp.org/vks/v1/by-fingerprint/${fingerprint}" -o "$keyfile"
+if [ ! -s "$keyfile" ]; then
+    echo "Failed to download key. Check the fingerprint."
+    exit 1
+fi
+
+gpg --import "$keyfile"
+

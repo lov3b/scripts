@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""Replace VobSub tracks with SRT files in MKV containers using ffmpeg."""
+
+import argparse
+import logging
+import subprocess
+import sys
+from pathlib import Path
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+
+def check_dependencies() -> bool:
+    """Check if required tools are available."""
+    for tool in ["ffmpeg", "ffprobe"]:
+        if subprocess.run(["which", tool], capture_output=True).returncode != 0:
+            logger.error(f"Required program '{tool}' is not installed or not in PATH.")
+            return False
+    return True
+
+
+def has_vobsub_tracks(mkv_file: Path) -> bool:
+    """Check if MKV file has VobSub subtitle tracks."""
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "s",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "csv=p=0",
+            str(mkv_file),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return "dvd_subtitle" in result.stdout
+
+
+def extract_language(srt_file: Path, default_lang: str = "swe") -> str:
+    """Extract language code from SRT filename (e.g., Title01.2.swe.srt -> swe)."""
+    parts = srt_file.stem.split(".")
+    # Look for 3-letter language code before .srt
+    if len(parts) >= 2 and len(parts[-1]) == 3 and parts[-1].isalpha():
+        return parts[-1]
+    return default_lang
+
+
+def replace_subtitles(mkv_file: Path, srt_files: list[Path], default_lang: str) -> bool:
+    """Replace VobSub tracks with SRT files using ffmpeg."""
+    temp_file = mkv_file.with_name(f"{mkv_file.stem}.new.mkv")
+
+    # Build ffmpeg command
+    cmd = ["ffmpeg", "-y", "-i", str(mkv_file)]
+
+    # Add SRT inputs
+    languages = []
+    for srt_file in srt_files:
+        lang = extract_language(srt_file, default_lang)
+        languages.append(lang)
+        logger.info(f"    Adding: {srt_file.name} (language: {lang})")
+        cmd.extend(["-i", str(srt_file)])
+
+    # Map video and audio (exclude original subtitles)
+    cmd.extend(["-map", "0:v", "-map", "0:a"])
+
+    # Map new SRT files
+    for i in range(len(srt_files)):
+        cmd.extend(["-map", f"{i + 1}:s"])
+
+    # Copy codecs (no re-encoding)
+    cmd.extend(["-c:v", "copy", "-c:a", "copy", "-c:s", "srt"])
+
+    # Set subtitle languages
+    for i, lang in enumerate(languages):
+        cmd.extend([f"-metadata:s:s:{i}", f"language={lang}"])
+
+    cmd.append(str(temp_file))
+
+    # Execute ffmpeg
+    logger.info("  Executing ffmpeg...")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode == 0 and temp_file.exists():
+        temp_file.replace(mkv_file)
+        for srt_file in srt_files:
+            srt_file.unlink()
+        logger.info(f"  ✓ Successfully replaced subtitles in {mkv_file.name}")
+        return True
+    else:
+        logger.error(f"  ffmpeg failed for {mkv_file.name}")
+        if result.stderr:
+            # Print last few lines of error
+            error_lines = result.stderr.strip().split("\n")[-5:]
+            for line in error_lines:
+                logger.error(f"    {line}")
+        if temp_file.exists():
+            temp_file.unlink()
+        return False
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Replace VobSub tracks with SRT files in MKV containers using ffmpeg."
+    )
+    parser.add_argument(
+        "-l",
+        "--lang",
+        default="swe",
+        help="Default 3-letter language code for SRT tracks (default: swe)",
+    )
+    args = parser.parse_args()
+
+    if not check_dependencies():
+        sys.exit(1)
+
+    logger.info(
+        f"Starting SRT replacement in MKV files (default language: {args.lang})..."
+    )
+    logger.info("---")
+
+    cwd = Path.cwd()
+    mkv_files = sorted(cwd.glob("*.mkv"))
+
+    if not mkv_files:
+        logger.warning("No MKV files found in current directory.")
+        return
+
+    for mkv_file in mkv_files:
+        logger.info(f"Processing file: {mkv_file.name}")
+
+        # Find matching SRT files
+        srt_files = sorted(mkv_file.parent.glob(f"{mkv_file.stem}.*.srt"))
+
+        if not srt_files:
+            logger.info("  No corresponding SRT files found. Skipping.")
+            logger.info("---")
+            continue
+
+        if not has_vobsub_tracks(mkv_file):
+            logger.info("  No VobSub tracks found to remove. Skipping.")
+            logger.info("---")
+            continue
+
+        replace_subtitles(mkv_file, srt_files, args.lang)
+        logger.info("---")
+
+    logger.info("Replacement complete.")
+
+
+if __name__ == "__main__":
+    main()

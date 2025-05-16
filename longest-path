@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+dir="${1:-$(pwd)}"
+
+find "$dir" -print |
+awk '
+    length($0) > max { max = length($0); path = $0 }
+    END { printf "%d: %s\n", max, path }
+'

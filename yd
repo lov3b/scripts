@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+# A wrapper arounnd yt-dlp but with aria2c
+
+if [ -z "$1" ]; then
+	echo "Usage: $(basename "$0") <URL>"
+    exit 1
+fi
+
+yt-dlp --external-downloader aria2c \
+       --external-downloader-args '-x 16 -k 8M' \
+       "$1"
+

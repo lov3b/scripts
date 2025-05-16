@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""Convert VobSub (image) tracks in MKV files to SRT (text) using OCR."""
+
+import argparse
+import logging
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Iterator
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+
+def check_dependencies() -> bool:
+    """Check if required tools are available."""
+    for tool in ["mkvmerge", "mkvextract", "vobsub2srt", "tesseract"]:
+        if subprocess.run(["which", tool], capture_output=True).returncode != 0:
+            logger.error(f"Required program '{tool}' is not installed or not in PATH.")
+            return False
+        logger.info(f"  ✓ {tool} found.")
+    return True
+
+
+def get_vobsub_tracks(mkv_file: Path) -> Iterator[tuple[str, str | None]]:
+    """Get VobSub track information from MKV file.
+
+    Returns:
+        List of (track_id, language) tuples
+    """
+    result = subprocess.run(
+        ["mkvmerge", "-i", str(mkv_file)],
+        capture_output=True,
+        text=True,
+    )
+
+    tracks = []
+    for line in result.stdout.splitlines():
+        if "subtitles (VobSub)" not in line:
+            continue
+        # Extract track ID
+        track_match = re.search(r"Track ID (\d+)", line)
+        if not track_match:
+            continue
+        track_id = track_match.group(1)
+
+        # Extract language code if present
+        lang_match = re.search(r"language:([a-z]{3})", line)
+        language = lang_match.group(1) if lang_match else None
+
+        yield (track_id, language)
+
+
+def convert_vobsub_track(
+    mkv_file: Path,
+    track_id: str,
+    track_lang: str | None,
+    ocr_lang: str,
+) -> bool:
+    """Convert a single VobSub track to SRT using OCR.
+
+    Args:
+        mkv_file: Path to MKV file
+        track_id: Track ID to extract
+        track_lang: Language from track metadata (may be None)
+        ocr_lang: OCR language to use
+
+    Returns:
+        True if successful, False otherwise
+    """
+    srt_lang = track_lang or ocr_lang
+
+    # Output filenames: Title01.2.swe.srt
+    output_basename = mkv_file.stem + f".{track_id}"
+    output_idx = mkv_file.parent / f"{output_basename}.idx"
+    output_sub = mkv_file.parent / f"{output_basename}.sub"
+    final_srt = mkv_file.parent / f"{output_basename}.{srt_lang}.srt"
+
+    logger.info(f"  - Found VobSub Track ID: {track_id} (Language: {srt_lang})")
+    logger.info("    Extracting VobSub stream to .idx and .sub...")
+
+    # Extract VobSub track
+    result = subprocess.run(
+        ["mkvextract", "tracks", str(mkv_file), f"{track_id}:{output_idx}"],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0 or not output_idx.exists():
+        logger.error(f"    Failed to extract track {track_id}. Skipping conversion.")
+        output_idx.unlink(missing_ok=True)
+        output_sub.unlink(missing_ok=True)
+        return False
+
+    logger.info(f"    Converting to SRT using vobsub2srt (OCR Lang: {ocr_lang})...")
+
+    # Convert VobSub to SRT
+    result = subprocess.run(
+        ["vobsub2srt", "--tesseract-lang", ocr_lang, str(output_idx.with_suffix(""))],
+        capture_output=True,
+        text=True,
+        cwd=mkv_file.parent,
+    )
+
+    # vobsub2srt creates output_basename.srt, rename it to include language
+    temp_srt = mkv_file.parent / f"{output_basename}.srt"
+
+    if temp_srt.exists():
+        temp_srt.rename(final_srt)
+        logger.info(f"    ✓ SRT file created: {final_srt.name}")
+        success = True
+    else:
+        logger.error(f"    Expected SRT file not found: {temp_srt.name}")
+        success = False
+
+    # Clean up VobSub files
+    output_idx.unlink(missing_ok=True)
+    output_sub.unlink(missing_ok=True)
+
+    return success
+
+
+def process_mkv_file(mkv_file: Path, ocr_lang: str) -> None:
+    """Process a single MKV file, converting all VobSub tracks to SRT."""
+    logger.info(f"Processing file: {mkv_file.name}")
+
+    tracks = list(get_vobsub_tracks(mkv_file))
+
+    if not tracks:
+        logger.info("  No VobSub tracks found. Skipping.")
+        return
+
+    for track_id, track_lang in tracks:
+        convert_vobsub_track(mkv_file, track_id, track_lang, ocr_lang)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Convert VobSub (image) tracks in MKV files to SRT (text) using OCR."
+    )
+    parser.add_argument(
+        "-l",
+        "--lang",
+        default="swe",
+        help="Tesseract OCR language code (e.g., eng, fra, deu). Default: swe (Swedish)",
+    )
+    args = parser.parse_args()
+
+    logger.info("Checking required programs...")
+    if not check_dependencies():
+        sys.exit(1)
+    logger.info("---")
+
+    logger.info(f"Starting VobSub to SRT conversion (OCR Language: {args.lang})...")
+    logger.info("---")
+
+    cwd = Path.cwd()
+    mkv_files = sorted(cwd.glob("*.mkv"))
+
+    if not mkv_files:
+        logger.warning("No MKV files found in current directory.")
+        return
+
+    for mkv_file in mkv_files:
+        process_mkv_file(mkv_file, args.lang)
+        logger.info("---")
+
+    logger.info(
+        "Conversion complete. Remember to manually check and correct the generated SRT files."
+    )
+
+
+if __name__ == "__main__":
+    main()
