@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+IFS=$'\n\t'
+
+ext="${1:-}"
+
+if [[ -z "$ext" ]]; then
+  echo "Usage: $(basename "$0") <extension>" >&2
+  exit 1
+fi
+
+if [[ "${ext:0:1}" != "." ]]; then
+  ext=".$ext"
+fi
+
+mapfile -d '' files < <(find . -type f -name "*$ext" -print0)
+
+if (( ${#files[@]} == 0 )); then
+  echo "No files found with extension '$ext'" >&2
+  exit 0
+fi
+
+for file in "${files[@]}"; do
+  echo "File: $file"
+  cat "$file"
+done
+echo "Found ${#files[@]} file(s)" >&2
