@@ -27,4 +27,4 @@ if (( files_len > 20 )); then
 fi
 
 printf '%s\0' "${files[@]}" \
-  | parallel -0 -bar flac -f8 {}
+  | parallel --null --bar flac -f8 -s {}
