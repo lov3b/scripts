@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+for flac in *.flac; do 
+	echo -en "$flac: \n\t"
+	sox "$flac" -n stats 2>&1 | grep "Bit-depth"
+done
