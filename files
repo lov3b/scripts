@@ -4,7 +4,16 @@ import os
 import sys
 from pathlib import Path
 
-IGNORE_DIRS = {".venv", "node_modules", ".git", "__pycache__", "build"}
+IGNORE_DIRS = {
+    ".venv",
+    "node_modules",
+    ".git",
+    "__pycache__",
+    "build",
+    "vcpkg",
+    "vcpkg_installed",
+    "build",
+}
 EXTENSION_ALIASES = {
     "++": (".cpp", ".hpp", ".h", ".c", ".cc", ".cxx", ".hxx"),
 }
